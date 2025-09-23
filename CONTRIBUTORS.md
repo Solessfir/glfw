@@ -23,6 +23,7 @@ video tutorials.
  - Denis Bernard
  - BiBi
  - Doug Binks
+ - bitb4ker
  - blanco
  - Waris Boonyasiriwat
  - Kyle Brenneman
@@ -123,6 +124,7 @@ video tutorials.
  - Josh Kilmer
  - Byunghoon Kim
  - Cameron King
+ - knokko
  - Peter Knut
  - Christoph Kubisch
  - Yuri Kunde Schlesner
