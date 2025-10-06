@@ -54,6 +54,10 @@ src/glfw3.pc
 src/glfw3Config.cmake
 src/glfw3ConfigVersion.cmake
 
+# Generated Wayland protocol headers
+src/*-client-protocol.h
+src/*-client-protocol-code.h
+
 # Compiled binaries
 src/libglfw.so
 src/libglfw.so.3

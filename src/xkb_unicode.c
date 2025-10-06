@@ -906,6 +906,11 @@ static const struct codepair {
 
 // Convert XKB KeySym to Unicode
 //
+
+#ifndef GLFW_INVALID_CODEPOINT
+#define GLFW_INVALID_CODEPOINT 0xffffffffu
+#endif
+
 uint32_t _glfwKeySym2Unicode(unsigned int keysym)
 {
     int min = 0;
