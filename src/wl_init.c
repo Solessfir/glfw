@@ -496,6 +496,7 @@ GLFWbool _glfwConnectWayland(int platformID, _GLFWplatform* platform)
         .getWindowOpacity = _glfwGetWindowOpacityWayland,
         .setWindowResizable = _glfwSetWindowResizableWayland,
         .setWindowDecorated = _glfwSetWindowDecoratedWayland,
+        .setWindowTitleBar = _glfwSetWindowTitleBarWayland,
         .setWindowFloating = _glfwSetWindowFloatingWayland,
         .setWindowOpacity = _glfwSetWindowOpacityWayland,
         .setWindowMousePassthrough = _glfwSetWindowMousePassthroughWayland,

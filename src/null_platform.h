@@ -180,6 +180,7 @@ typedef struct _GLFWwindowNull
     GLFWbool        maximized;
     GLFWbool        resizable;
     GLFWbool        decorated;
+    GLFWbool        titlebar;
     GLFWbool        floating;
     GLFWbool        transparent;
     float           opacity;

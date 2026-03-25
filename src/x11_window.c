@@ -53,6 +53,12 @@
 // Motif WM hints flags
 #define MWM_HINTS_DECORATIONS   2
 #define MWM_DECOR_ALL           1
+#define MWM_DECOR_BORDER        2
+#define MWM_DECOR_TITLE         4
+#define MWM_DECOR_RESIZEH       8
+#define MWM_DECOR_MENU          16
+#define MWM_DECOR_MINIMIZE      32
+#define MWM_DECOR_MAXIMIZE      64
 
 #define _GLFW_XDND_VERSION 5
 
@@ -633,6 +639,8 @@ static GLFWbool createNativeWindow(_GLFWwindow* window,
 
     if (!wndconfig->decorated)
         _glfwSetWindowDecoratedX11(window, GLFW_FALSE);
+    else if (!wndconfig->titlebar)
+        _glfwSetWindowTitleBarX11(window, GLFW_FALSE);
 
     if (_glfw.x11.NET_WM_STATE && !window->monitor)
     {
@@ -2661,7 +2669,7 @@ void _glfwSetWindowResizableX11(_GLFWwindow* window, GLFWbool enabled)
     updateNormalHints(window, width, height);
 }
 
-void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
+static void setWindowDecorationsX11(_GLFWwindow* window)
 {
     struct
     {
@@ -2673,7 +2681,13 @@ void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
     } hints = {0};
 
     hints.flags = MWM_HINTS_DECORATIONS;
-    hints.decorations = enabled ? MWM_DECOR_ALL : 0;
+
+    if (!window->decorated)
+        hints.decorations = 0;
+    else if (window->titlebar)
+        hints.decorations = MWM_DECOR_ALL;
+    else
+        hints.decorations = MWM_DECOR_BORDER | MWM_DECOR_RESIZEH;
 
     XChangeProperty(_glfw.x11.display, window->x11.handle,
                     _glfw.x11.MOTIF_WM_HINTS,
@@ -2681,6 +2695,18 @@ void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
                     PropModeReplace,
                     (unsigned char*) &hints,
                     sizeof(hints) / sizeof(long));
+}
+
+void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
+{
+    window->decorated = enabled;
+    setWindowDecorationsX11(window);
+}
+
+void _glfwSetWindowTitleBarX11(_GLFWwindow* window, GLFWbool enabled)
+{
+    window->titlebar = enabled;
+    setWindowDecorationsX11(window);
 }
 
 void _glfwSetWindowFloatingX11(_GLFWwindow* window, GLFWbool enabled)

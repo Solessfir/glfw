@@ -2848,13 +2848,13 @@ void _glfwSetWindowDecoratedWayland(_GLFWwindow* window, GLFWbool enabled)
 {
     if (window->wl.libdecor.frame)
     {
-        libdecor_frame_set_visibility(window->wl.libdecor.frame, enabled);
+        libdecor_frame_set_visibility(window->wl.libdecor.frame, enabled && window->titlebar);
     }
     else if (window->wl.xdg.decoration)
     {
         uint32_t mode;
 
-        if (enabled)
+        if (enabled && window->titlebar)
             mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
         else
             mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
@@ -2863,11 +2863,17 @@ void _glfwSetWindowDecoratedWayland(_GLFWwindow* window, GLFWbool enabled)
     }
     else if (window->wl.xdg.toplevel)
     {
-        if (enabled)
+        if (enabled && window->titlebar)
             createFallbackDecorations(window);
         else
             destroyFallbackDecorations(window);
     }
+}
+
+void _glfwSetWindowTitleBarWayland(_GLFWwindow* window, GLFWbool enabled)
+{
+    window->titlebar = enabled;
+    _glfwSetWindowDecoratedWayland(window, window->decorated);
 }
 
 void _glfwSetWindowFloatingWayland(_GLFWwindow* window, GLFWbool enabled)
