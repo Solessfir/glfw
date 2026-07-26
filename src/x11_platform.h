@@ -542,6 +542,15 @@ typedef struct _GLFWwindowX11
     // The last position the cursor was warped to by GLFW
     int             warpCursorPosX, warpCursorPosY;
 
+    // State used to emulate native non-client input for custom title bars
+    int             pressedHitTest;
+    int             cursorHitTest;
+    unsigned int    suppressedButtons;
+    Time            lastCaptionClickTime;
+    int             lastCaptionClickX, lastCaptionClickY;
+    Cursor          hitTestDefaultCursor;
+    Cursor          hitTestCursors[8];
+
     // The time of the last KeyPress event per keycode, for discarding
     // duplicate key events generated for some keys by ibus
     Time            keyPressTimes[256];
@@ -613,6 +622,8 @@ typedef struct _GLFWlibraryX11
     Atom            NET_ACTIVE_WINDOW;
     Atom            NET_FRAME_EXTENTS;
     Atom            NET_REQUEST_FRAME_EXTENTS;
+    Atom            NET_WM_MOVERESIZE;
+    Atom            GTK_SHOW_WINDOW_MENU;
     Atom            MOTIF_WM_HINTS;
 
     // Xdnd (drag and drop) atoms
@@ -929,6 +940,7 @@ GLFWbool _glfwWindowHoveredX11(_GLFWwindow* window);
 GLFWbool _glfwFramebufferTransparentX11(_GLFWwindow* window);
 void _glfwSetWindowResizableX11(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled);
+void _glfwSetWindowTitleBarX11(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowFloatingX11(_GLFWwindow* window, GLFWbool enabled);
 float _glfwGetWindowOpacityX11(_GLFWwindow* window);
 void _glfwSetWindowOpacityX11(_GLFWwindow* window, float opacity);

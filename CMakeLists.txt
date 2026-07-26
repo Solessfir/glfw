@@ -97,6 +97,7 @@ if (GLFW_BUILD_EXAMPLES)
 endif()
 
 if (GLFW_BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
 endif()
 

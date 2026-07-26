@@ -28,6 +28,19 @@ add_executable(iconify iconify.c ${GETOPT} ${GLAD_GL})
 add_executable(monitors monitors.c ${GETOPT} ${GLAD_GL})
 add_executable(reopen reopen.c ${GLAD_GL})
 add_executable(cursor cursor.c ${GLAD_GL})
+add_executable(custom-titlebar WIN32 custom_titlebar.c ${GLAD_GL})
+add_executable(titlebar-api titlebar_api.c)
+
+add_test(NAME titlebar-api COMMAND titlebar-api)
+
+if (WIN32 AND GLFW_BUILD_SHARED_LIBRARY)
+    foreach(target custom-titlebar titlebar-api)
+        add_custom_command(TARGET ${target} POST_BUILD
+                           COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                                   "$<TARGET_FILE:glfw>"
+                                   "$<TARGET_FILE_DIR:${target}>")
+    endforeach()
+endif()
 
 add_executable(empty WIN32 MACOSX_BUNDLE empty.c ${TINYCTHREAD} ${GLAD_GL})
 add_executable(gamma WIN32 MACOSX_BUNDLE gamma.c ${GLAD_GL})
@@ -48,10 +61,10 @@ if (RT_LIBRARY)
     target_link_libraries(threads "${RT_LIBRARY}")
 endif()
 
-set(GUI_ONLY_BINARIES empty gamma icon inputlag joysticks tearing threads
+set(GUI_ONLY_BINARIES custom-titlebar empty gamma icon inputlag joysticks tearing threads
     timeout title triangle-vulkan window)
 set(CONSOLE_BINARIES allocator clipboard events msaa glfwinfo iconify monitors
-    reopen cursor)
+    reopen cursor titlebar-api)
 
 set_target_properties(${GUI_ONLY_BINARIES} ${CONSOLE_BINARIES} PROPERTIES
                       C_STANDARD 99

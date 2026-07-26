@@ -359,7 +359,10 @@ typedef struct _GLFWwindowWin32
     HICON               smallIcon;
 
     GLFWbool            cursorTracked;
+    GLFWbool            cursorTrackedClient;
+    GLFWbool            cursorTrackedNonClient;
     GLFWbool            frameAction;
+    int                 pressedHitTest;
     GLFWbool            iconified;
     GLFWbool            maximized;
     // Whether to enable framebuffer transparency on DWM
@@ -511,6 +514,7 @@ GLFWbool _glfwWindowHoveredWin32(_GLFWwindow* window);
 GLFWbool _glfwFramebufferTransparentWin32(_GLFWwindow* window);
 void _glfwSetWindowResizableWin32(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowDecoratedWin32(_GLFWwindow* window, GLFWbool enabled);
+void _glfwSetWindowTitleBarWin32(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowFloatingWin32(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowMousePassthroughWin32(_GLFWwindow* window, GLFWbool enabled);
 float _glfwGetWindowOpacityWin32(_GLFWwindow* window);

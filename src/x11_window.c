@@ -46,6 +46,17 @@
 #define _NET_WM_STATE_ADD           1
 #define _NET_WM_STATE_TOGGLE        2
 
+// Directions for _NET_WM_MOVERESIZE client messages
+#define _NET_WM_MOVERESIZE_SIZE_TOPLEFT      0
+#define _NET_WM_MOVERESIZE_SIZE_TOP          1
+#define _NET_WM_MOVERESIZE_SIZE_TOPRIGHT     2
+#define _NET_WM_MOVERESIZE_SIZE_RIGHT        3
+#define _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT  4
+#define _NET_WM_MOVERESIZE_SIZE_BOTTOM       5
+#define _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT   6
+#define _NET_WM_MOVERESIZE_SIZE_LEFT         7
+#define _NET_WM_MOVERESIZE_MOVE              8
+
 // Additional mouse button names for XButtonEvent
 #define Button6            6
 #define Button7            7
@@ -53,8 +64,16 @@
 // Motif WM hints flags
 #define MWM_HINTS_DECORATIONS   2
 #define MWM_DECOR_ALL           1
+#define MWM_DECOR_BORDER        2
+#define MWM_DECOR_TITLE         4
+#define MWM_DECOR_RESIZEH       8
+#define MWM_DECOR_MENU          16
+#define MWM_DECOR_MINIMIZE      32
+#define MWM_DECOR_MAXIMIZE      64
 
 #define _GLFW_XDND_VERSION 5
+
+static void setWindowDecorationsX11(_GLFWwindow* window);
 
 // Wait for event data to arrive on the X11 display socket
 // This avoids blocking other threads via the per-display Xlib lock that also
@@ -459,7 +478,25 @@ static void updateCursorImage(_GLFWwindow* window)
     if (window->cursorMode == GLFW_CURSOR_NORMAL ||
         window->cursorMode == GLFW_CURSOR_CAPTURED)
     {
-        if (window->cursor)
+        Cursor hitTestCursor = None;
+        if (window->x11.cursorHitTest != GLFW_HIT_TEST_CLIENT)
+            hitTestCursor = window->x11.hitTestDefaultCursor;
+
+        if (window->resizable && !window->x11.maximized &&
+            window->x11.cursorHitTest >= GLFW_HIT_TEST_RESIZE_LEFT &&
+            window->x11.cursorHitTest <= GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT)
+        {
+            const int index =
+                window->x11.cursorHitTest - GLFW_HIT_TEST_RESIZE_LEFT;
+            hitTestCursor = window->x11.hitTestCursors[index];
+        }
+
+        if (hitTestCursor)
+        {
+            XDefineCursor(_glfw.x11.display, window->x11.handle,
+                          hitTestCursor);
+        }
+        else if (window->cursor)
         {
             XDefineCursor(_glfw.x11.display, window->x11.handle,
                           window->cursor->x11.handle);
@@ -472,6 +509,273 @@ static void updateCursorImage(_GLFWwindow* window)
         XDefineCursor(_glfw.x11.display, window->x11.handle,
                       _glfw.x11.hiddenCursorHandle);
     }
+}
+
+// Returns the callback result only while the application owns the title bar.
+// Full screen and override-redirect windows cannot delegate these operations
+// to the window manager.
+//
+static int getWindowHitTest(_GLFWwindow* window, int xpos, int ypos)
+{
+    if (!window->decorated || window->monitor || window->titlebar ||
+        window->x11.overrideRedirect)
+    {
+        return GLFW_HIT_TEST_CLIENT;
+    }
+
+    return _glfwInputWindowHitTest(window, xpos, ypos);
+}
+
+static GLFWbool isResizeHitTest(int hitTest)
+{
+    return hitTest >= GLFW_HIT_TEST_RESIZE_LEFT &&
+           hitTest <= GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT;
+}
+
+static long getMoveResizeDirection(int hitTest)
+{
+    switch (hitTest)
+    {
+        case GLFW_HIT_TEST_CAPTION:
+            return _NET_WM_MOVERESIZE_MOVE;
+        case GLFW_HIT_TEST_RESIZE_LEFT:
+            return _NET_WM_MOVERESIZE_SIZE_LEFT;
+        case GLFW_HIT_TEST_RESIZE_RIGHT:
+            return _NET_WM_MOVERESIZE_SIZE_RIGHT;
+        case GLFW_HIT_TEST_RESIZE_TOP:
+            return _NET_WM_MOVERESIZE_SIZE_TOP;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM:
+            return _NET_WM_MOVERESIZE_SIZE_BOTTOM;
+        case GLFW_HIT_TEST_RESIZE_TOP_LEFT:
+            return _NET_WM_MOVERESIZE_SIZE_TOPLEFT;
+        case GLFW_HIT_TEST_RESIZE_TOP_RIGHT:
+            return _NET_WM_MOVERESIZE_SIZE_TOPRIGHT;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM_LEFT:
+            return _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT:
+            return _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT;
+    }
+
+    return -1;
+}
+
+static void beginWindowMoveResize(_GLFWwindow* window,
+                                  const XButtonEvent* event,
+                                  int hitTest)
+{
+    if (!_glfw.x11.NET_WM_MOVERESIZE)
+        return;
+
+    const long direction = getMoveResizeDirection(hitTest);
+    if (direction < 0 || (direction != _NET_WM_MOVERESIZE_MOVE &&
+                         !window->resizable))
+    {
+        return;
+    }
+
+    // Release Xlib's implicit button grab before asking the WM to take over.
+    XUngrabPointer(_glfw.x11.display, event->time);
+    sendEventToWM(window,
+                  _glfw.x11.NET_WM_MOVERESIZE,
+                  event->x_root, event->y_root,
+                  direction, event->button, 1);
+    XFlush(_glfw.x11.display);
+}
+
+static void showWindowMenu(_GLFWwindow* window, const XButtonEvent* event)
+{
+    if (!_glfw.x11.GTK_SHOW_WINDOW_MENU)
+        return;
+
+    // Zero is the conventional fallback for clients that do not retain the
+    // originating XI2 device ID.
+    XUngrabPointer(_glfw.x11.display, event->time);
+    sendEventToWM(window,
+                  _glfw.x11.GTK_SHOW_WINDOW_MENU,
+                  0, event->x_root, event->y_root, 0, 0);
+    XFlush(_glfw.x11.display);
+}
+
+static void toggleWindowMaximize(_GLFWwindow* window)
+{
+    if (!window->resizable ||
+        !_glfw.x11.NET_WM_STATE ||
+        !_glfw.x11.NET_WM_STATE_MAXIMIZED_VERT ||
+        !_glfw.x11.NET_WM_STATE_MAXIMIZED_HORZ)
+    {
+        return;
+    }
+
+    if (_glfwWindowMaximizedX11(window))
+        _glfwRestoreWindowX11(window);
+    else
+        _glfwMaximizeWindowX11(window);
+}
+
+static GLFWbool isCaptionDoubleClick(_GLFWwindow* window,
+                                     const XButtonEvent* event)
+{
+    // X11 does not provide a portable title-bar double-click interval once
+    // decorations are client-side.  This matches the common desktop default.
+    const Time interval = 500;
+    const int distance = 5;
+    const Time elapsed = event->time - window->x11.lastCaptionClickTime;
+    const int dx = event->x_root - window->x11.lastCaptionClickX;
+    const int dy = event->y_root - window->x11.lastCaptionClickY;
+    const GLFWbool doubleClick = window->x11.lastCaptionClickTime &&
+                                 elapsed <= interval &&
+                                 abs(dx) <= distance &&
+                                 abs(dy) <= distance;
+
+    if (doubleClick)
+        window->x11.lastCaptionClickTime = 0;
+    else
+    {
+        window->x11.lastCaptionClickTime = event->time;
+        window->x11.lastCaptionClickX = event->x_root;
+        window->x11.lastCaptionClickY = event->y_root;
+    }
+
+    return doubleClick;
+}
+
+static GLFWbool handleTitleBarButtonPress(_GLFWwindow* window,
+                                          const XButtonEvent* event)
+{
+    // A WM-owned move, resize or menu grab may consume the matching release.
+    // Clear any stale suppression before deciding how to handle this press.
+    if (event->button < sizeof(window->x11.suppressedButtons) * 8)
+        window->x11.suppressedButtons &= ~(1u << event->button);
+    if (event->button == Button1)
+        window->x11.pressedHitTest = GLFW_HIT_TEST_CLIENT;
+
+    const int hitTest = getWindowHitTest(window, event->x, event->y);
+    if (hitTest == GLFW_HIT_TEST_CLIENT)
+        return GLFW_FALSE;
+
+    if (event->button == Button1)
+    {
+        if (hitTest == GLFW_HIT_TEST_CAPTION)
+        {
+            if (isCaptionDoubleClick(window, event))
+                toggleWindowMaximize(window);
+            else
+                beginWindowMoveResize(window, event, hitTest);
+        }
+        else if (isResizeHitTest(hitTest))
+            beginWindowMoveResize(window, event, hitTest);
+        else if (hitTest == GLFW_HIT_TEST_SYSTEM_MENU)
+            showWindowMenu(window, event);
+        else if (hitTest == GLFW_HIT_TEST_MINIMIZE_BUTTON ||
+                 hitTest == GLFW_HIT_TEST_MAXIMIZE_BUTTON ||
+                 hitTest == GLFW_HIT_TEST_CLOSE_BUTTON)
+        {
+            window->x11.pressedHitTest = hitTest;
+        }
+    }
+    else if (event->button == Button3 &&
+             (hitTest == GLFW_HIT_TEST_CAPTION ||
+              hitTest == GLFW_HIT_TEST_SYSTEM_MENU))
+    {
+        showWindowMenu(window, event);
+    }
+
+    if (event->button < sizeof(window->x11.suppressedButtons) * 8)
+    {
+        window->x11.suppressedButtons |= 1u << event->button;
+    }
+
+    return GLFW_TRUE;
+}
+
+static GLFWbool handleTitleBarButtonRelease(_GLFWwindow* window,
+                                            const XButtonEvent* event)
+{
+    if (event->button >= sizeof(window->x11.suppressedButtons) * 8 ||
+        !(window->x11.suppressedButtons & (1u << event->button)))
+    {
+        return GLFW_FALSE;
+    }
+
+    window->x11.suppressedButtons &= ~(1u << event->button);
+
+    if (event->button == Button1 && window->x11.pressedHitTest)
+    {
+        const int pressedHitTest = window->x11.pressedHitTest;
+        const int releasedHitTest =
+            getWindowHitTest(window, event->x, event->y);
+        window->x11.pressedHitTest = GLFW_HIT_TEST_CLIENT;
+
+        if (pressedHitTest == releasedHitTest)
+        {
+            if (pressedHitTest == GLFW_HIT_TEST_MINIMIZE_BUTTON)
+                _glfwIconifyWindowX11(window);
+            else if (pressedHitTest == GLFW_HIT_TEST_MAXIMIZE_BUTTON)
+                toggleWindowMaximize(window);
+            else if (pressedHitTest == GLFW_HIT_TEST_CLOSE_BUTTON)
+                _glfwInputWindowCloseRequest(window);
+        }
+    }
+
+    return GLFW_TRUE;
+}
+
+static unsigned int getHitTestCursorShape(int hitTest)
+{
+    switch (hitTest)
+    {
+        case GLFW_HIT_TEST_RESIZE_LEFT:
+            return XC_left_side;
+        case GLFW_HIT_TEST_RESIZE_RIGHT:
+            return XC_right_side;
+        case GLFW_HIT_TEST_RESIZE_TOP:
+            return XC_top_side;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM:
+            return XC_bottom_side;
+        case GLFW_HIT_TEST_RESIZE_TOP_LEFT:
+            return XC_top_left_corner;
+        case GLFW_HIT_TEST_RESIZE_TOP_RIGHT:
+            return XC_top_right_corner;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM_LEFT:
+            return XC_bottom_left_corner;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT:
+            return XC_bottom_right_corner;
+    }
+
+    return 0;
+}
+
+static void updateHitTestCursor(_GLFWwindow* window, int xpos, int ypos)
+{
+    const int hitTest = getWindowHitTest(window, xpos, ypos);
+
+    if (hitTest == window->x11.cursorHitTest)
+        return;
+
+    if (hitTest != GLFW_HIT_TEST_CLIENT)
+    {
+        if (!window->x11.hitTestDefaultCursor)
+        {
+            window->x11.hitTestDefaultCursor =
+                XCreateFontCursor(_glfw.x11.display, XC_left_ptr);
+        }
+
+        if (window->resizable && !window->x11.maximized &&
+            isResizeHitTest(hitTest))
+        {
+            const int index = hitTest - GLFW_HIT_TEST_RESIZE_LEFT;
+            if (!window->x11.hitTestCursors[index])
+            {
+                window->x11.hitTestCursors[index] =
+                    XCreateFontCursor(_glfw.x11.display,
+                                      getHitTestCursorShape(hitTest));
+            }
+        }
+    }
+
+    window->x11.cursorHitTest = hitTest;
+    updateCursorImage(window);
+    XFlush(_glfw.x11.display);
 }
 
 // Grabs the cursor and confines it to the window
@@ -633,6 +937,8 @@ static GLFWbool createNativeWindow(_GLFWwindow* window,
 
     if (!wndconfig->decorated)
         _glfwSetWindowDecoratedX11(window, GLFW_FALSE);
+    else if (!wndconfig->titlebar)
+        _glfwSetWindowTitleBarX11(window, GLFW_FALSE);
 
     if (_glfw.x11.NET_WM_STATE && !window->monitor)
     {
@@ -1359,6 +1665,9 @@ static void processEvent(XEvent *event)
 
         case ButtonPress:
         {
+            if (handleTitleBarButtonPress(window, &event->xbutton))
+                return;
+
             const int mods = translateState(event->xbutton.state);
 
             if (event->xbutton.button == Button1)
@@ -1393,6 +1702,9 @@ static void processEvent(XEvent *event)
 
         case ButtonRelease:
         {
+            if (handleTitleBarButtonRelease(window, &event->xbutton))
+                return;
+
             const int mods = translateState(event->xbutton.state);
 
             if (event->xbutton.button == Button1)
@@ -1443,6 +1755,12 @@ static void processEvent(XEvent *event)
             _glfwInputCursorEnter(window, GLFW_TRUE);
             _glfwInputCursorPos(window, x, y);
 
+            if (window->cursorMode == GLFW_CURSOR_NORMAL ||
+                window->cursorMode == GLFW_CURSOR_CAPTURED)
+            {
+                updateHitTestCursor(window, x, y);
+            }
+
             window->x11.lastCursorPosX = x;
             window->x11.lastCursorPosY = y;
             return;
@@ -1450,6 +1768,13 @@ static void processEvent(XEvent *event)
 
         case LeaveNotify:
         {
+            if (window->x11.cursorHitTest != GLFW_HIT_TEST_CLIENT)
+            {
+                window->x11.cursorHitTest = GLFW_HIT_TEST_CLIENT;
+                updateCursorImage(window);
+                XFlush(_glfw.x11.display);
+            }
+
             _glfwInputCursorEnter(window, GLFW_FALSE);
             return;
         }
@@ -1480,6 +1805,12 @@ static void processEvent(XEvent *event)
                 }
                 else
                     _glfwInputCursorPos(window, x, y);
+            }
+
+            if (window->cursorMode == GLFW_CURSOR_NORMAL ||
+                window->cursorMode == GLFW_CURSOR_CAPTURED)
+            {
+                updateHitTestCursor(window, x, y);
             }
 
             window->x11.lastCursorPosX = x;
@@ -1780,6 +2111,9 @@ static void processEvent(XEvent *event)
             if (window->x11.ic)
                 XUnsetICFocus(window->x11.ic);
 
+            window->x11.pressedHitTest = GLFW_HIT_TEST_CLIENT;
+            window->x11.suppressedButtons = 0;
+
             if (window->monitor && window->autoIconify)
                 _glfwIconifyWindowX11(window);
 
@@ -1825,6 +2159,15 @@ static void processEvent(XEvent *event)
                 if (window->x11.maximized != maximized)
                 {
                     window->x11.maximized = maximized;
+
+                    if (window->cursorMode == GLFW_CURSOR_NORMAL ||
+                        window->cursorMode == GLFW_CURSOR_CAPTURED)
+                    {
+                        updateHitTestCursor(window,
+                                            window->x11.lastCursorPosX,
+                                            window->x11.lastCursorPosY);
+                    }
+
                     _glfwInputWindowMaximize(window, maximized);
                 }
             }
@@ -2064,6 +2407,21 @@ void _glfwDestroyWindowX11(_GLFWwindow* window)
 
     if (window->context.destroy)
         window->context.destroy(window);
+
+    if (window->x11.hitTestDefaultCursor)
+    {
+        XFreeCursor(_glfw.x11.display, window->x11.hitTestDefaultCursor);
+        window->x11.hitTestDefaultCursor = (Cursor) 0;
+    }
+
+    for (int i = 0;  i < 8;  i++)
+    {
+        if (window->x11.hitTestCursors[i])
+        {
+            XFreeCursor(_glfw.x11.display, window->x11.hitTestCursors[i]);
+            window->x11.hitTestCursors[i] = (Cursor) 0;
+        }
+    }
 
     if (window->x11.handle)
     {
@@ -2659,9 +3017,15 @@ void _glfwSetWindowResizableX11(_GLFWwindow* window, GLFWbool enabled)
     int width, height;
     _glfwGetWindowSizeX11(window, &width, &height);
     updateNormalHints(window, width, height);
+
+    if (isResizeHitTest(window->x11.cursorHitTest))
+        updateCursorImage(window);
+
+    if (window->decorated && !window->titlebar)
+        setWindowDecorationsX11(window);
 }
 
-void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
+static void setWindowDecorationsX11(_GLFWwindow* window)
 {
     struct
     {
@@ -2673,7 +3037,17 @@ void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
     } hints = {0};
 
     hints.flags = MWM_HINTS_DECORATIONS;
-    hints.decorations = enabled ? MWM_DECOR_ALL : 0;
+
+    if (!window->decorated)
+        hints.decorations = 0;
+    else if (window->titlebar)
+        hints.decorations = MWM_DECOR_ALL;
+    else
+    {
+        hints.decorations = MWM_DECOR_BORDER;
+        if (window->resizable)
+            hints.decorations |= MWM_DECOR_RESIZEH;
+    }
 
     XChangeProperty(_glfw.x11.display, window->x11.handle,
                     _glfw.x11.MOTIF_WM_HINTS,
@@ -2681,6 +3055,42 @@ void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
                     PropModeReplace,
                     (unsigned char*) &hints,
                     sizeof(hints) / sizeof(long));
+
+    XFlush(_glfw.x11.display);
+}
+
+void _glfwSetWindowDecoratedX11(_GLFWwindow* window, GLFWbool enabled)
+{
+    window->decorated = enabled;
+
+    if (!enabled && window->x11.cursorHitTest != GLFW_HIT_TEST_CLIENT)
+    {
+        window->x11.cursorHitTest = GLFW_HIT_TEST_CLIENT;
+        updateCursorImage(window);
+    }
+
+    if (!enabled)
+    {
+        window->x11.pressedHitTest = GLFW_HIT_TEST_CLIENT;
+        window->x11.suppressedButtons = 0;
+    }
+
+    setWindowDecorationsX11(window);
+}
+
+void _glfwSetWindowTitleBarX11(_GLFWwindow* window, GLFWbool enabled)
+{
+    window->titlebar = enabled;
+
+    if (enabled && window->x11.cursorHitTest != GLFW_HIT_TEST_CLIENT)
+    {
+        window->x11.cursorHitTest = GLFW_HIT_TEST_CLIENT;
+        updateCursorImage(window);
+    }
+
+    window->x11.pressedHitTest = GLFW_HIT_TEST_CLIENT;
+    window->x11.suppressedButtons = 0;
+    setWindowDecorationsX11(window);
 }
 
 void _glfwSetWindowFloatingX11(_GLFWwindow* window, GLFWbool enabled)

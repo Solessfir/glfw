@@ -405,6 +405,16 @@ typedef struct _GLFWwindowWayland
         struct libdecor_frame*  frame;
     } libdecor;
 
+    struct {
+        int                     region;
+        int                     pressedRegions[GLFW_MOUSE_BUTTON_LAST + 1];
+        uint32_t                consumedButtons;
+        const char*             cursorName;
+        uint32_t                lastCaptionClickTime;
+        int                     lastCaptionClickX;
+        int                     lastCaptionClickY;
+    } hitTest;
+
     double                      cursorPosX, cursorPosY;
 
     char*                       appId;
@@ -501,6 +511,8 @@ typedef struct _GLFWlibraryWayland
         double                  discreteY;
         int                     button;
         int                     action;
+        uint32_t                buttonSerial;
+        uint32_t                buttonTime;
     } pending;
 
     struct {
@@ -684,6 +696,7 @@ GLFWbool _glfwWindowHoveredWayland(_GLFWwindow* window);
 GLFWbool _glfwFramebufferTransparentWayland(_GLFWwindow* window);
 void _glfwSetWindowResizableWayland(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowDecoratedWayland(_GLFWwindow* window, GLFWbool enabled);
+void _glfwSetWindowTitleBarWayland(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowFloatingWayland(_GLFWwindow* window, GLFWbool enabled);
 float _glfwGetWindowOpacityWayland(_GLFWwindow* window);
 void _glfwSetWindowOpacityWayland(_GLFWwindow* window, float opacity);

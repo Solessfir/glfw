@@ -197,6 +197,17 @@ not be resizable by the user but will still allow the user to generate close
 events on some platforms.  Possible values are `GLFW_TRUE` and `GLFW_FALSE`.
 This hint is ignored for full screen windows.
 
+@anchor GLFW_TITLEBAR_hint
+__GLFW_TITLEBAR__ specifies whether a decorated windowed mode window will use
+the native title bar.  Set this to `GLFW_FALSE` to draw a custom title bar while
+retaining native window management behavior.  The application should also set
+a [window hit test callback](@ref window_hit_test) so the window system can move,
+resize, minimize, maximize and close the window.  Possible values are
+`GLFW_TRUE` and `GLFW_FALSE`.  This hint is ignored for full screen and
+undecorated windows.
+
+@note __macOS:__ Custom title bars are not currently supported.
+
 @anchor GLFW_FOCUSED_hint
 __GLFW_FOCUSED__ specifies whether the windowed mode window will be given input
 focus when created.  Possible values are `GLFW_TRUE` and `GLFW_FALSE`.  This
@@ -932,6 +943,54 @@ The current window title can be queried with @ref glfwGetWindowTitle.
 const char* title = glfwGetWindowTitle(window);
 ```
 
+### Custom title bar hit testing {#window_hit_test}
+
+A decorated window can replace its native title bar while preserving native
+window movement, resizing and system actions.  Disable the native title bar
+before creating the window and set a hit test callback after creation.
+
+```c
+glfwWindowHint(GLFW_TITLEBAR, GLFW_FALSE);
+GLFWwindow* window = glfwCreateWindow(1280, 720, "Editor", NULL, NULL);
+glfwSetWindowHitTestCallback(window, window_hit_test_callback);
+```
+
+The callback receives cursor coordinates relative to the top-left corner of
+the content area and returns the role of that position.  Interactive controls
+in the custom title bar should return `GLFW_HIT_TEST_CLIENT` so they continue
+to receive normal mouse input.
+
+```c
+int window_hit_test_callback(GLFWwindow* window, int xpos, int ypos)
+{
+    int width;
+    glfwGetWindowSize(window, &width, NULL);
+
+    if (ypos < 40)
+    {
+        if (xpos >= width - 46)
+            return GLFW_HIT_TEST_CLOSE_BUTTON;
+        if (xpos >= width - 92)
+            return GLFW_HIT_TEST_MAXIMIZE_BUTTON;
+        if (xpos >= width - 138)
+            return GLFW_HIT_TEST_MINIMIZE_BUTTON;
+
+        return GLFW_HIT_TEST_CAPTION;
+    }
+
+    return GLFW_HIT_TEST_CLIENT;
+}
+```
+
+Resize hit test results are ignored for non-resizable windows.  System button
+results are handled by the window system and do not generate mouse button
+callbacks.  The callback is not used for full screen windows, undecorated
+windows or windows with the native title bar enabled.
+
+On Win32, returning `GLFW_HIT_TEST_MAXIMIZE_BUTTON` also enables the Windows 11
+Snap Layout menu.  On X11 and Wayland, movement and resizing are delegated to
+the window manager or compositor rather than being implemented by GLFW.
+
 ### Window icon {#window_icon}
 
 Decorated windows have icons on some platforms.  You can set this icon by
@@ -1319,6 +1378,7 @@ if (glfwGetWindowAttrib(window, GLFW_FOCUSED))
 ```
 
 The [GLFW_DECORATED](@ref GLFW_DECORATED_attrib),
+[GLFW_TITLEBAR](@ref GLFW_TITLEBAR_attrib),
 [GLFW_RESIZABLE](@ref GLFW_RESIZABLE_attrib),
 [GLFW_FLOATING](@ref GLFW_FLOATING_attrib),
 [GLFW_AUTO_ICONIFY](@ref GLFW_AUTO_ICONIFY_attrib) and
@@ -1365,6 +1425,12 @@ __GLFW_DECORATED__ indicates whether the specified window has decorations such
 as a border, a close widget, etc.  This can be set before creation with the
 [GLFW_DECORATED](@ref GLFW_DECORATED_hint) window hint or after with @ref
 glfwSetWindowAttrib.
+
+@anchor GLFW_TITLEBAR_attrib
+__GLFW_TITLEBAR__ indicates whether the specified window uses its native title
+bar.  This can be set before creation with the
+[GLFW_TITLEBAR](@ref GLFW_TITLEBAR_hint) window hint or after with @ref
+glfwSetWindowAttrib.  See @ref window_hit_test for details.
 
 @anchor GLFW_AUTO_ICONIFY_attrib
 __GLFW_AUTO_ICONIFY__ indicates whether the specified full screen window is

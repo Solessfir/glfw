@@ -18,6 +18,18 @@ systems.  On Linux both Wayland and X11 are supported.
 GLFW is licensed under the [zlib/libpng
 license](https://www.glfw.org/license.html).
 
+## Fork additions
+
+This fork adds client-rendered title bars for Win32, X11 and Wayland.  Windows
+retain native movement, resizing, system buttons and Snap Layout behavior while
+applications draw the title bar content.  X11 and Wayland delegate movement and
+resizing to the window manager or compositor.
+
+Set the `GLFW_TITLEBAR` window hint to `GLFW_FALSE`, then describe the custom
+caption, resize and system-button regions with `glfwSetWindowHitTestCallback`.
+See the window guide and the `custom-titlebar` test program for a complete
+example.
+
 You can [download](https://www.glfw.org/download.html) the latest stable release
 as source or Windows and macOS binaries.  There are [release
 tags](https://github.com/glfw/glfw/releases) with source and binary archives

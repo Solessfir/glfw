@@ -922,6 +922,13 @@ extern "C" {
  */
 #define GLFW_FOCUS_ON_SHOW          0x0002000C
 
+/*! @brief Native window title bar window hint and attribute.
+ *
+ *  Native window title bar [window hint](@ref GLFW_TITLEBAR_hint) and
+ *  [window attribute](@ref GLFW_TITLEBAR_attrib).
+ */
+#define GLFW_TITLEBAR               0x00020010
+
 /*! @brief Mouse input transparency window hint and attribute
  *
  *  Mouse input transparency [window hint](@ref GLFW_MOUSE_PASSTHROUGH_hint) or
@@ -1181,6 +1188,46 @@ extern "C" {
 #define GLFW_WAYLAND_DISABLE_LIBDECOR   0x00038002
 
 #define GLFW_ANY_POSITION           0x80000000
+
+/*! @defgroup hit_test Window hit test results
+ *  @brief Window hit test result tokens.
+ *
+ *  These are the values returned by a [window hit test callback](@ref
+ *  window_hit_test).
+ *
+ *  @ingroup window
+ *  @{ */
+
+/*! @brief The position is part of the normal client area. */
+#define GLFW_HIT_TEST_CLIENT                 0
+/*! @brief The position is part of the draggable title bar. */
+#define GLFW_HIT_TEST_CAPTION                1
+/*! @brief The position resizes the window from the left edge. */
+#define GLFW_HIT_TEST_RESIZE_LEFT            2
+/*! @brief The position resizes the window from the right edge. */
+#define GLFW_HIT_TEST_RESIZE_RIGHT           3
+/*! @brief The position resizes the window from the top edge. */
+#define GLFW_HIT_TEST_RESIZE_TOP             4
+/*! @brief The position resizes the window from the bottom edge. */
+#define GLFW_HIT_TEST_RESIZE_BOTTOM          5
+/*! @brief The position resizes the window from the top-left corner. */
+#define GLFW_HIT_TEST_RESIZE_TOP_LEFT        6
+/*! @brief The position resizes the window from the top-right corner. */
+#define GLFW_HIT_TEST_RESIZE_TOP_RIGHT       7
+/*! @brief The position resizes the window from the bottom-left corner. */
+#define GLFW_HIT_TEST_RESIZE_BOTTOM_LEFT     8
+/*! @brief The position resizes the window from the bottom-right corner. */
+#define GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT    9
+/*! @brief The position is the window system menu button. */
+#define GLFW_HIT_TEST_SYSTEM_MENU           10
+/*! @brief The position is the minimize button. */
+#define GLFW_HIT_TEST_MINIMIZE_BUTTON       11
+/*! @brief The position is the maximize or restore button. */
+#define GLFW_HIT_TEST_MAXIMIZE_BUTTON       12
+/*! @brief The position is the close button. */
+#define GLFW_HIT_TEST_CLOSE_BUTTON          13
+
+/*! @} */
 
 /*! @defgroup shapes Standard cursor shapes
  *  @brief Standard system cursor shapes.
@@ -1616,6 +1663,28 @@ typedef void (* GLFWerrorfun)(int error_code, const char* description);
  *  @ingroup window
  */
 typedef void (* GLFWwindowposfun)(GLFWwindow* window, int xpos, int ypos);
+
+/*! @brief The function pointer type for window hit test callbacks.
+ *
+ *  This is the function pointer type for window hit test callbacks.  A window
+ *  hit test callback function has the following signature:
+ *  @code
+ *  int callback_name(GLFWwindow* window, int xpos, int ypos)
+ *  @endcode
+ *
+ *  @param[in] window The window that was hit-tested.
+ *  @param[in] xpos The x-coordinate of the cursor, relative to the left edge
+ *  of the content area.
+ *  @param[in] ypos The y-coordinate of the cursor, relative to the top edge
+ *  of the content area.
+ *  @return One of the [window hit test result tokens](@ref hit_test).
+ *
+ *  @sa @ref window_hit_test
+ *  @sa @ref glfwSetWindowHitTestCallback
+ *
+ *  @ingroup window
+ */
+typedef int (* GLFWhittestfun)(GLFWwindow* window, int xpos, int ypos);
 
 /*! @brief The function pointer type for window size callbacks.
  *
@@ -4121,6 +4190,7 @@ GLFWAPI int glfwGetWindowAttrib(GLFWwindow* window, int attrib);
  *  This function sets the value of an attribute of the specified window.
  *
  *  The supported attributes are [GLFW_DECORATED](@ref GLFW_DECORATED_attrib),
+ *  [GLFW_TITLEBAR](@ref GLFW_TITLEBAR_attrib),
  *  [GLFW_RESIZABLE](@ref GLFW_RESIZABLE_attrib),
  *  [GLFW_FLOATING](@ref GLFW_FLOATING_attrib),
  *  [GLFW_AUTO_ICONIFY](@ref GLFW_AUTO_ICONIFY_attrib) and
@@ -4236,6 +4306,42 @@ GLFWAPI void* glfwGetWindowUserPointer(GLFWwindow* window);
  *  @ingroup window
  */
 GLFWAPI GLFWwindowposfun glfwSetWindowPosCallback(GLFWwindow* window, GLFWwindowposfun callback);
+
+/*! @brief Sets the hit test callback for the specified window.
+ *
+ *  This function sets the hit test callback of the specified window.  The
+ *  callback identifies draggable, resizable and system button regions drawn
+ *  by the application when the native title bar is disabled.
+ *
+ *  @param[in] window The window whose callback to set.
+ *  @param[in] callback The new callback, or `NULL` to remove the currently set callback.
+ *  @return The previously set callback, or `NULL` if no callback was set or the
+ *  library had not been [initialized](@ref intro_init).
+ *
+ *  @callback_signature
+ *  @code
+ *  int function_name(GLFWwindow* window, int xpos, int ypos)
+ *  @endcode
+ *  For more information about the callback parameters, see the
+ *  [function pointer type](@ref GLFWhittestfun).
+ *
+ *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED.
+ *
+ *  @remark The callback is only used for windowed mode windows with
+ *  [GLFW_TITLEBAR](@ref GLFW_TITLEBAR_attrib) set to `GLFW_FALSE`.
+ *
+ *  @remark Resize results are ignored for non-resizable windows.  System
+ *  button results are handled by the window system and do not generate mouse
+ *  button callbacks.
+ *
+ *  @remark __Win32:__ Returning @ref GLFW_HIT_TEST_MAXIMIZE_BUTTON enables the
+ *  native Snap Layout menu on supported versions of Windows.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @ingroup window
+ */
+GLFWAPI GLFWhittestfun glfwSetWindowHitTestCallback(GLFWwindow* window, GLFWhittestfun callback);
 
 /*! @brief Sets the size callback for the specified window.
  *

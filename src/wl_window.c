@@ -63,6 +63,9 @@
 #define GLFW_PENDING_SCROLL     8
 #define GLFW_PENDING_DISCRETE   16
 
+static GLFWbool hasCustomTitlebar(const _GLFWwindow* window);
+static void updateCustomTitlebarCursor(_GLFWwindow* window);
+
 static int createTmpfileCloexec(char* tmpname)
 {
     int fd;
@@ -241,6 +244,12 @@ static void createFallbackDecorations(_GLFWwindow* window)
     unsigned char data[] = { 224, 224, 224, 255 };
     const GLFWimage image = { 1, 1, data };
 
+    if (window->wl.fallback.decorations ||
+        !window->decorated || !window->titlebar)
+    {
+        return;
+    }
+
     if (!_glfw.wl.viewporter)
         return;
 
@@ -273,6 +282,8 @@ static void destroyFallbackEdge(_GLFWfallbackEdgeWayland* edge)
 {
     if (edge->surface == _glfw.wl.pointerSurface)
         _glfw.wl.pointerSurface = NULL;
+    if (edge->surface == _glfw.wl.pending.pointerSurface)
+        _glfw.wl.pending.pointerSurface = NULL;
 
     if (edge->subsurface)
         wl_subsurface_destroy(edge->subsurface);
@@ -448,7 +459,7 @@ static void xdgDecorationHandleConfigure(void* userData,
 
     if (mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE)
     {
-        if (window->decorated && !window->monitor)
+        if (window->decorated && window->titlebar && !window->monitor)
             createFallbackDecorations(window);
     }
     else
@@ -809,6 +820,7 @@ static void xdgSurfaceHandleConfigure(void* userData,
     }
 
     window->wl.fullscreen = window->wl.pending.fullscreen;
+    updateCustomTitlebarCursor(window);
 
     int width  = window->wl.pending.width;
     int height = window->wl.pending.height;
@@ -898,8 +910,9 @@ void libdecorFrameHandleConfigure(struct libdecor_frame* frame,
     libdecor_state_free(frameState);
 
     // NOTE: Frame visibility must only be set after a frame state has been committed
-    if (window->decorated != libdecor_frame_is_visible(window->wl.libdecor.frame))
-        libdecor_frame_set_visibility(window->wl.libdecor.frame, window->decorated);
+    const GLFWbool frameVisible = window->decorated && window->titlebar;
+    if (frameVisible != libdecor_frame_is_visible(window->wl.libdecor.frame))
+        libdecor_frame_set_visibility(window->wl.libdecor.frame, frameVisible);
 
     if (window->wl.activated != activated)
     {
@@ -918,6 +931,7 @@ void libdecorFrameHandleConfigure(struct libdecor_frame* frame,
     }
 
     window->wl.fullscreen = fullscreen;
+    updateCustomTitlebarCursor(window);
 
     GLFWbool damaged = GLFW_FALSE;
 
@@ -1134,7 +1148,7 @@ static GLFWbool createXdgShellObjects(_GLFWwindow* window)
 
         uint32_t mode;
 
-        if (window->decorated)
+        if (window->decorated && window->titlebar)
             mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
         else
             mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
@@ -1143,7 +1157,7 @@ static GLFWbool createXdgShellObjects(_GLFWwindow* window)
     }
     else
     {
-        if (window->decorated && !window->monitor)
+        if (window->decorated && window->titlebar && !window->monitor)
             createFallbackDecorations(window);
     }
 
@@ -1289,6 +1303,337 @@ static void setCursorImage(_GLFWwindow* window,
     wl_surface_damage(surface, 0, 0,
                       cursorWayland->width, cursorWayland->height);
     wl_surface_commit(surface);
+}
+
+static GLFWbool hasCustomTitlebar(const _GLFWwindow* window)
+{
+    return window->decorated && !window->titlebar && !window->monitor;
+}
+
+static struct xdg_toplevel* getXdgToplevel(_GLFWwindow* window)
+{
+    if (window->wl.xdg.toplevel)
+        return window->wl.xdg.toplevel;
+    if (window->wl.libdecor.frame)
+        return libdecor_frame_get_xdg_toplevel(window->wl.libdecor.frame);
+
+    return NULL;
+}
+
+static GLFWbool setCustomTitlebarCursorImage(_GLFWwindow* window,
+                                             const char* name,
+                                             const char* legacyName)
+{
+    struct wl_cursor* cursor = wl_cursor_theme_get_cursor(_glfw.wl.cursorTheme, name);
+    if (!cursor && legacyName)
+        cursor = wl_cursor_theme_get_cursor(_glfw.wl.cursorTheme, legacyName);
+    if (!cursor)
+        return GLFW_FALSE;
+
+    struct wl_cursor* cursorHiDPI = NULL;
+    if (_glfw.wl.cursorThemeHiDPI)
+    {
+        cursorHiDPI = wl_cursor_theme_get_cursor(_glfw.wl.cursorThemeHiDPI, name);
+        if (!cursorHiDPI && legacyName)
+        {
+            cursorHiDPI =
+                wl_cursor_theme_get_cursor(_glfw.wl.cursorThemeHiDPI, legacyName);
+        }
+    }
+
+    _GLFWcursorWayland cursorWayland =
+    {
+        cursor,
+        cursorHiDPI,
+        NULL,
+        0, 0,
+        0, 0,
+        0
+    };
+
+    setCursorImage(window, &cursorWayland);
+    return GLFW_TRUE;
+}
+
+static const char* getCustomTitlebarCursorName(_GLFWwindow* window,
+                                                const char** legacyName)
+{
+    *legacyName = NULL;
+
+    if (!hasCustomTitlebar(window) ||
+        window->wl.surface != _glfw.wl.pointerSurface ||
+        (window->cursorMode != GLFW_CURSOR_NORMAL &&
+         window->cursorMode != GLFW_CURSOR_CAPTURED))
+    {
+        return NULL;
+    }
+
+    if (window->resizable && !window->wl.maximized && !window->wl.fullscreen)
+    {
+        switch (window->wl.hitTest.region)
+        {
+            case GLFW_HIT_TEST_RESIZE_LEFT:
+                *legacyName = "left_side";
+                return "w-resize";
+            case GLFW_HIT_TEST_RESIZE_RIGHT:
+                *legacyName = "right_side";
+                return "e-resize";
+            case GLFW_HIT_TEST_RESIZE_TOP:
+                *legacyName = "top_side";
+                return "n-resize";
+            case GLFW_HIT_TEST_RESIZE_BOTTOM:
+                *legacyName = "bottom_side";
+                return "s-resize";
+            case GLFW_HIT_TEST_RESIZE_TOP_LEFT:
+                *legacyName = "top_left_corner";
+                return "nw-resize";
+            case GLFW_HIT_TEST_RESIZE_TOP_RIGHT:
+                *legacyName = "top_right_corner";
+                return "ne-resize";
+            case GLFW_HIT_TEST_RESIZE_BOTTOM_LEFT:
+                *legacyName = "bottom_left_corner";
+                return "sw-resize";
+            case GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT:
+                *legacyName = "bottom_right_corner";
+                return "se-resize";
+        }
+    }
+
+    if (window->wl.hitTest.region != GLFW_HIT_TEST_CLIENT)
+        return "left_ptr";
+
+    return NULL;
+}
+
+static void updateCustomTitlebarCursor(_GLFWwindow* window)
+{
+    const char* legacyName;
+    const char* cursorName = getCustomTitlebarCursorName(window, &legacyName);
+    if (window->wl.hitTest.cursorName == cursorName)
+        return;
+
+    window->wl.hitTest.cursorName = cursorName;
+
+    if (cursorName)
+    {
+        if (!setCustomTitlebarCursorImage(window, cursorName, legacyName) &&
+            strcmp(cursorName, "left_ptr") != 0)
+        {
+            setCustomTitlebarCursorImage(window, "left_ptr", NULL);
+        }
+    }
+    else if (window->wl.surface == _glfw.wl.pointerSurface)
+        _glfwSetCursorWayland(window, window->cursor);
+}
+
+static int updateCustomTitlebarHitTest(_GLFWwindow* window,
+                                       double xpos,
+                                       double ypos)
+{
+    int region = GLFW_HIT_TEST_CLIENT;
+    if (hasCustomTitlebar(window))
+        region = _glfwInputWindowHitTest(window, (int) xpos, (int) ypos);
+
+    if (window->wl.hitTest.region != region)
+    {
+        window->wl.hitTest.region = region;
+        updateCustomTitlebarCursor(window);
+    }
+
+    return region;
+}
+
+static uint32_t getXdgResizeEdge(int region)
+{
+    switch (region)
+    {
+        case GLFW_HIT_TEST_RESIZE_LEFT:
+            return XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+        case GLFW_HIT_TEST_RESIZE_RIGHT:
+            return XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+        case GLFW_HIT_TEST_RESIZE_TOP:
+            return XDG_TOPLEVEL_RESIZE_EDGE_TOP;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM:
+            return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
+        case GLFW_HIT_TEST_RESIZE_TOP_LEFT:
+            return XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
+        case GLFW_HIT_TEST_RESIZE_TOP_RIGHT:
+            return XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM_LEFT:
+            return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
+        case GLFW_HIT_TEST_RESIZE_BOTTOM_RIGHT:
+            return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
+        default:
+            return XDG_TOPLEVEL_RESIZE_EDGE_NONE;
+    }
+}
+
+static void showCustomTitlebarSystemMenu(_GLFWwindow* window, uint32_t serial)
+{
+    struct xdg_toplevel* toplevel = getXdgToplevel(window);
+    if (!toplevel)
+        return;
+
+    xdg_toplevel_show_window_menu(toplevel, _glfw.wl.seat, serial,
+                                  (int32_t) window->wl.cursorPosX,
+                                  (int32_t) window->wl.cursorPosY);
+}
+
+static void performCustomTitlebarButtonAction(_GLFWwindow* window, int region)
+{
+    switch (region)
+    {
+        case GLFW_HIT_TEST_MINIMIZE_BUTTON:
+            if (window->wl.libdecor.frame)
+                libdecor_frame_set_minimized(window->wl.libdecor.frame);
+            else if (window->wl.xdg.toplevel)
+                xdg_toplevel_set_minimized(window->wl.xdg.toplevel);
+            break;
+
+        case GLFW_HIT_TEST_MAXIMIZE_BUTTON:
+            if (!window->resizable || window->wl.fullscreen)
+                break;
+
+            if (window->wl.libdecor.frame)
+            {
+                if (window->wl.maximized)
+                    libdecor_frame_unset_maximized(window->wl.libdecor.frame);
+                else
+                    libdecor_frame_set_maximized(window->wl.libdecor.frame);
+            }
+            else if (window->wl.xdg.toplevel)
+            {
+                if (window->wl.maximized)
+                    xdg_toplevel_unset_maximized(window->wl.xdg.toplevel);
+                else
+                    xdg_toplevel_set_maximized(window->wl.xdg.toplevel);
+            }
+            break;
+
+        case GLFW_HIT_TEST_CLOSE_BUTTON:
+            _glfwInputWindowCloseRequest(window);
+            break;
+    }
+}
+
+static GLFWbool isCustomTitlebarCaptionDoubleClick(_GLFWwindow* window,
+                                                    uint32_t time)
+{
+    // Wayland has no portable double-click setting for client decorations.
+    const uint32_t interval = 500;
+    const int distance = 5;
+    const int xpos = (int) window->wl.cursorPosX;
+    const int ypos = (int) window->wl.cursorPosY;
+    const uint32_t elapsed = time - window->wl.hitTest.lastCaptionClickTime;
+    const int dx = xpos - window->wl.hitTest.lastCaptionClickX;
+    const int dy = ypos - window->wl.hitTest.lastCaptionClickY;
+    const GLFWbool doubleClick = window->wl.hitTest.lastCaptionClickTime &&
+                                 elapsed <= interval &&
+                                 dx >= -distance && dx <= distance &&
+                                 dy >= -distance && dy <= distance;
+
+    if (doubleClick)
+        window->wl.hitTest.lastCaptionClickTime = 0;
+    else
+    {
+        window->wl.hitTest.lastCaptionClickTime = time;
+        window->wl.hitTest.lastCaptionClickX = xpos;
+        window->wl.hitTest.lastCaptionClickY = ypos;
+    }
+
+    return doubleClick;
+}
+
+static GLFWbool handleCustomTitlebarButton(_GLFWwindow* window,
+                                           int button,
+                                           int action,
+                                           uint32_t serial,
+                                           uint32_t time)
+{
+    if (button < 0 || button > GLFW_MOUSE_BUTTON_LAST)
+        return GLFW_FALSE;
+
+    const uint32_t buttonMask = 1u << button;
+
+    if (action == GLFW_RELEASE)
+    {
+        if (!(window->wl.hitTest.consumedButtons & buttonMask))
+            return GLFW_FALSE;
+
+        const int pressedRegion = window->wl.hitTest.pressedRegions[button];
+        window->wl.hitTest.consumedButtons &= ~buttonMask;
+        window->wl.hitTest.pressedRegions[button] = GLFW_HIT_TEST_CLIENT;
+
+        const int region = updateCustomTitlebarHitTest(window,
+                                                       window->wl.cursorPosX,
+                                                       window->wl.cursorPosY);
+        if (button == GLFW_MOUSE_BUTTON_LEFT && region == pressedRegion)
+            performCustomTitlebarButtonAction(window, region);
+
+        return GLFW_TRUE;
+    }
+
+    // A compositor may consume the release after taking over an interactive
+    // move, resize or menu grab.  A new press proves any old state is stale.
+    window->wl.hitTest.consumedButtons &= ~buttonMask;
+    window->wl.hitTest.pressedRegions[button] = GLFW_HIT_TEST_CLIENT;
+
+    if (!hasCustomTitlebar(window))
+        return GLFW_FALSE;
+
+    const int region = updateCustomTitlebarHitTest(window,
+                                                   window->wl.cursorPosX,
+                                                   window->wl.cursorPosY);
+    if (region == GLFW_HIT_TEST_CLIENT)
+    {
+        if (button == GLFW_MOUSE_BUTTON_LEFT)
+            window->wl.hitTest.lastCaptionClickTime = 0;
+        return GLFW_FALSE;
+    }
+
+    if (button != GLFW_MOUSE_BUTTON_LEFT)
+        window->wl.hitTest.lastCaptionClickTime = 0;
+
+    struct xdg_toplevel* toplevel = getXdgToplevel(window);
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT)
+    {
+        if (region == GLFW_HIT_TEST_CAPTION)
+        {
+            if (window->resizable && !window->wl.fullscreen &&
+                isCustomTitlebarCaptionDoubleClick(window, time))
+            {
+                performCustomTitlebarButtonAction(window,
+                                                  GLFW_HIT_TEST_MAXIMIZE_BUTTON);
+            }
+            else if (toplevel)
+                xdg_toplevel_move(toplevel, _glfw.wl.seat, serial);
+        }
+        else if (region == GLFW_HIT_TEST_SYSTEM_MENU)
+            showCustomTitlebarSystemMenu(window, serial);
+        else if (window->resizable && !window->wl.maximized && !window->wl.fullscreen)
+        {
+            const uint32_t edge = getXdgResizeEdge(region);
+            if (toplevel && edge != XDG_TOPLEVEL_RESIZE_EDGE_NONE)
+                xdg_toplevel_resize(toplevel, _glfw.wl.seat, serial, edge);
+        }
+
+        if (region != GLFW_HIT_TEST_CAPTION)
+            window->wl.hitTest.lastCaptionClickTime = 0;
+    }
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT &&
+             (region == GLFW_HIT_TEST_CAPTION ||
+              region == GLFW_HIT_TEST_SYSTEM_MENU))
+    {
+        showCustomTitlebarSystemMenu(window, serial);
+    }
+
+    // Some compositors still deliver the release after taking over the grab.
+    // Track it in either case so an unmatched release never reaches the app.
+    window->wl.hitTest.consumedButtons |= buttonMask;
+    window->wl.hitTest.pressedRegions[button] = region;
+
+    return GLFW_TRUE;
 }
 
 static void incrementCursorImage(void)
@@ -1559,7 +1904,11 @@ static void processPointerLeaveSurface(struct wl_surface* surface)
 
     _GLFWwindow* window = wl_surface_get_user_data(surface);
     if (window->wl.surface == surface)
+    {
+        window->wl.hitTest.region = GLFW_HIT_TEST_CLIENT;
+        window->wl.hitTest.cursorName = NULL;
         _glfwInputCursorEnter(window, GLFW_FALSE);
+    }
     else
     {
         if (window->wl.fallback.decorations)
@@ -1576,6 +1925,7 @@ static void processPointerMotion(double xpos, double ypos)
         {
             window->wl.cursorPosX = xpos;
             window->wl.cursorPosY = ypos;
+            updateCustomTitlebarHitTest(window, xpos, ypos);
             _glfwInputCursorPos(window, window->wl.cursorPosX, window->wl.cursorPosY);
         }
     }
@@ -1586,11 +1936,17 @@ static void processPointerMotion(double xpos, double ypos)
     }
 }
 
-static void processPointerButton(int button, int action)
+static void processPointerButton(int button,
+                                 int action,
+                                 uint32_t serial,
+                                 uint32_t time)
 {
     _GLFWwindow* window = wl_surface_get_user_data(_glfw.wl.pointerSurface);
     if (window->wl.surface == _glfw.wl.pointerSurface)
-        _glfwInputMouseClick(window, button, action, _glfw.wl.xkb.modifiers);
+    {
+        if (!handleCustomTitlebarButton(window, button, action, serial, time))
+            _glfwInputMouseClick(window, button, action, _glfw.wl.xkb.modifiers);
+    }
     else
     {
         if (window->wl.fallback.decorations)
@@ -1710,9 +2066,11 @@ static void pointerHandleButton(void* userData,
         _glfw.wl.pending.events |= GLFW_PENDING_BUTTON;
         _glfw.wl.pending.button = button;
         _glfw.wl.pending.action = action;
+        _glfw.wl.pending.buttonSerial = serial;
+        _glfw.wl.pending.buttonTime = time;
     }
     else
-        processPointerButton(button, action);
+        processPointerButton(button, action, serial, time);
 }
 
 static void pointerHandleAxis(void* userData,
@@ -1754,13 +2112,21 @@ static void pointerHandleFrame(void* userData, struct wl_pointer* pointer)
     }
 
     if (!_glfw.wl.pointerSurface)
+    {
+        memset(&_glfw.wl.pending, 0, sizeof(_glfw.wl.pending));
         return;
+    }
 
     if (_glfw.wl.pending.events & GLFW_PENDING_MOTION)
         processPointerMotion(_glfw.wl.pending.pointerX, _glfw.wl.pending.pointerY);
 
     if (_glfw.wl.pending.events & GLFW_PENDING_BUTTON)
-        processPointerButton(_glfw.wl.pending.button, _glfw.wl.pending.action);
+    {
+        processPointerButton(_glfw.wl.pending.button,
+                             _glfw.wl.pending.action,
+                             _glfw.wl.pending.buttonSerial,
+                             _glfw.wl.pending.buttonTime);
+    }
 
     if (_glfw.wl.pending.events & GLFW_PENDING_DISCRETE)
         processPointerScroll(_glfw.wl.pending.discreteX, _glfw.wl.pending.discreteY);
@@ -2816,7 +3182,17 @@ void _glfwSetWindowMonitorWayland(_GLFWwindow* window,
     if (window->monitor)
         acquireMonitor(window);
     else
+    {
         _glfwSetWindowSizeWayland(window, width, height);
+        _glfwSetWindowDecoratedWayland(window, window->decorated);
+    }
+
+    if (window->wl.surface == _glfw.wl.pointerSurface)
+    {
+        updateCustomTitlebarHitTest(window,
+                                    window->wl.cursorPosX,
+                                    window->wl.cursorPosY);
+    }
 }
 
 GLFWbool _glfwWindowFocusedWayland(_GLFWwindow* window)
@@ -2868,32 +3244,50 @@ void _glfwSetWindowResizableWayland(_GLFWwindow* window, GLFWbool enabled)
     }
     else if (window->wl.xdg.toplevel)
         updateXdgSizeLimits(window);
+
+    updateCustomTitlebarCursor(window);
 }
 
 void _glfwSetWindowDecoratedWayland(_GLFWwindow* window, GLFWbool enabled)
 {
     if (window->wl.libdecor.frame)
     {
-        libdecor_frame_set_visibility(window->wl.libdecor.frame, enabled);
+        libdecor_frame_set_visibility(window->wl.libdecor.frame, enabled && window->titlebar);
     }
     else if (window->wl.xdg.decoration)
     {
         uint32_t mode;
 
-        if (enabled)
+        if (enabled && window->titlebar)
             mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
         else
+        {
             mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+            destroyFallbackDecorations(window);
+        }
 
         zxdg_toplevel_decoration_v1_set_mode(window->wl.xdg.decoration, mode);
     }
     else if (window->wl.xdg.toplevel)
     {
-        if (enabled)
+        if (enabled && window->titlebar)
             createFallbackDecorations(window);
         else
             destroyFallbackDecorations(window);
     }
+
+    if (window->wl.surface == _glfw.wl.pointerSurface)
+    {
+        updateCustomTitlebarHitTest(window,
+                                    window->wl.cursorPosX,
+                                    window->wl.cursorPosY);
+    }
+}
+
+void _glfwSetWindowTitleBarWayland(_GLFWwindow* window, GLFWbool enabled)
+{
+    window->titlebar = enabled;
+    _glfwSetWindowDecoratedWayland(window, window->decorated);
 }
 
 void _glfwSetWindowFloatingWayland(_GLFWwindow* window, GLFWbool enabled)
@@ -3376,6 +3770,14 @@ void _glfwSetCursorWayland(_GLFWwindow* window, _GLFWcursor* cursor)
              window->cursorMode == GLFW_CURSOR_DISABLED)
     {
         wl_pointer_set_cursor(_glfw.wl.pointer, _glfw.wl.pointerEnterSerial, NULL, 0, 0);
+    }
+
+    if (hasCustomTitlebar(window) &&
+        window->wl.hitTest.region != GLFW_HIT_TEST_CLIENT)
+    {
+        // A client cursor change must not replace compositor interaction cursors.
+        window->wl.hitTest.cursorName = NULL;
+        updateCustomTitlebarCursor(window);
     }
 }
 

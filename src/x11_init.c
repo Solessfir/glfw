@@ -596,6 +596,10 @@ static void detectEWMH(void)
         getAtomIfSupported(supportedAtoms, atomCount, "_NET_FRAME_EXTENTS");
     _glfw.x11.NET_REQUEST_FRAME_EXTENTS =
         getAtomIfSupported(supportedAtoms, atomCount, "_NET_REQUEST_FRAME_EXTENTS");
+    _glfw.x11.NET_WM_MOVERESIZE =
+        getAtomIfSupported(supportedAtoms, atomCount, "_NET_WM_MOVERESIZE");
+    _glfw.x11.GTK_SHOW_WINDOW_MENU =
+        getAtomIfSupported(supportedAtoms, atomCount, "_GTK_SHOW_WINDOW_MENU");
 
     if (supportedAtoms)
         XFree(supportedAtoms);
@@ -1234,6 +1238,7 @@ GLFWbool _glfwConnectX11(int platformID, _GLFWplatform* platform)
         .getWindowOpacity = _glfwGetWindowOpacityX11,
         .setWindowResizable = _glfwSetWindowResizableX11,
         .setWindowDecorated = _glfwSetWindowDecoratedX11,
+        .setWindowTitleBar = _glfwSetWindowTitleBarX11,
         .setWindowFloating = _glfwSetWindowFloatingX11,
         .setWindowOpacity = _glfwSetWindowOpacityX11,
         .setWindowMousePassthrough = _glfwSetWindowMousePassthroughX11,
